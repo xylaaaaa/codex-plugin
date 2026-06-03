@@ -34,7 +34,7 @@ REMOTE_HELPER_NAME = "zedRemotePathForCodexPatch"
 class ZedPatchReporter:
     """Minimal reporting protocol used by the Zed remote patch."""
 
-    def add_file(self) -> None: ...
+    def add_file(self, path: Path | None = None) -> None: ...
 
     def add_patch(self, message: str) -> None: ...
 
@@ -95,7 +95,7 @@ def patch_zed_remote_open(paths: AppPaths, report: ZedPatchReporter) -> ZedRemot
 
     if content != original:
         write_text(bundle_path, content)
-        report.add_file()
+        report.add_file(bundle_path)
 
     status = detect_zed_remote_status(paths)
     if not status.patched:

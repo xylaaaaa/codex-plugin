@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .app import AppPaths
@@ -24,7 +24,20 @@ SIDEBAR_GATE_RE = re.compile(r"([A-Z])\?\(0,\$\.jsx\)\(Sl,\{tooltipContent")
 # "API key" phrasing or the current "not chatgpt" phrasing, regardless of
 # what identifier names the minifier has picked.
 APIKEY_GATE_FALLBACK_RE = re.compile(
-    r"function\s+([A-Za-z_$])\(\1\)\{return\s+\1(?:===|!==)`(?:apikey|chatgpt)`\}"
+    r"function\s+(?P<fn>[A-Za-z_$][\w$]*)"
+    r"\((?P<arg>[A-Za-z_$][\w$]*)\)"
+    r"\{return\s+(?P=arg)(?:===|!==)`(?:apikey|chatgpt)`\}"
+)
+
+VSCODE_FAST_QUERY_RE = re.compile(
+    r"async function (?P<fn>[A-Za-z_$][\w$]*)"
+    r"\((?P<args>[^)]*)\)\{let [^;]+;return .*?fast_mode!==!1:!1\}"
+)
+
+VSCODE_SERVICE_TIER_GATE_RE = re.compile(
+    r"(?P<loading>[A-Za-z_$][\w$]*=!![^,]+)\|\|[A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*,"
+    r"(?P<allowed>[A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*&&!?(?P<loading_ref>[A-Za-z_$][\w$]*)"
+    r"&&[^,;]+fast_mode!==!1"
 )
 
 
@@ -35,6 +48,7 @@ class PatchReport:
     patched_files: int = 0
     patch_actions: int = 0
     warnings: list[str] | None = None
+    patched_paths: set[Path] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         if self.warnings is None:
@@ -44,7 +58,13 @@ class PatchReport:
         self.patch_actions += 1
         print(f"[PATCHED] {message}")
 
-    def add_file(self) -> None:
+    def add_file(self, path: Path | None = None) -> None:
+        if path is None:
+            self.patched_files += 1
+            return
+        if path in self.patched_paths:
+            return
+        self.patched_paths.add(path)
         self.patched_files += 1
 
     def warn(self, message: str) -> None:
@@ -76,14 +96,14 @@ def patch_fast_mode(paths: AppPaths, report: PatchReport) -> None:
         content = patch_fast_auth(path, content, report)
         content = patch_fast_hook(path, content, report)
         content = patch_fast_models(path, content, report)
+        content = patch_vscode_fast_service_tier(path, content, report)
 
         if content != original:
             write_text(path, content)
-            report.add_file()
+            report.add_file(path)
 
     if not files:
-        report.warn("permissions-mode-helpers-*.js not found; searching all assets")
-        find_likely_fast_file(paths, report)
+        patch_vscode_fast_mode(paths, report)
 
 
 def patch_fast_auth(path: Path, content: str, report: PatchReport) -> str:
@@ -92,6 +112,15 @@ def patch_fast_auth(path: Path, content: str, report: PatchReport) -> str:
         if changed:
             report.add_patch(f"{path.name}: fast auth check -> return true")
             return content
+
+    content, count = VSCODE_FAST_QUERY_RE.subn(
+        lambda match: f"async function {match.group('fn')}({match.group('args')}){{return true}}",
+        content,
+        count=1,
+    )
+    if count > 0:
+        report.add_patch(f"{path.name}: VS Code fast auth check -> return true")
+        return content
 
     if "authMethod" in content and "fast_mode" in content:
         report.warn(f"{path.name}: fast auth pattern changed; inspect manually")
@@ -116,6 +145,36 @@ def patch_fast_models(path: Path, content: str, report: PatchReport) -> str:
 
     if "modelsByType.models.some" in content or ".models.some(" in content:
         report.warn(f"{path.name}: fast model pattern changed; inspect manually")
+    return content
+
+
+def patch_vscode_fast_mode(paths: AppPaths, report: PatchReport) -> None:
+    files = sorted(paths.assets_dir.glob("read-service-tier-for-request-*.js"))
+    files.extend(sorted(paths.assets_dir.glob("use-service-tier-settings-*.js")))
+    if not files:
+        report.warn("No fast_mode bundles found; inspect VS Code extension assets manually")
+        return
+
+    for path in files:
+        content = read_text(path)
+        original = content
+
+        content = patch_vscode_fast_service_tier(path, content, report)
+        content = patch_fast_auth(path, content, report)
+
+        if content != original:
+            write_text(path, content)
+            report.add_file(path)
+
+
+def patch_vscode_fast_service_tier(path: Path, content: str, report: PatchReport) -> str:
+    def replacement(match: re.Match[str]) -> str:
+        loading_name = match.group("loading").split("=", 1)[0]
+        return f"{match.group('loading')},{match.group('allowed')}=!{loading_name}"
+
+    content, count = VSCODE_SERVICE_TIER_GATE_RE.subn(replacement, content, count=1)
+    if count > 0:
+        report.add_patch(f"{path.name}: VS Code service-tier gate -> allowed")
     return content
 
 
@@ -144,7 +203,7 @@ def patch_plugin_sidebar(paths: AppPaths, report: PatchReport) -> None:
 
         if content != original:
             write_text(path, content)
-            report.add_file()
+            report.add_file(path)
 
 
 def replace_sidebar_gate(path: Path, content: str, gate: str, report: PatchReport) -> str:
@@ -158,39 +217,67 @@ def replace_sidebar_gate(path: Path, content: str, gate: str, report: PatchRepor
 
 def patch_apikey_gate(paths: AppPaths, report: PatchReport) -> None:
     files = sorted(paths.assets_dir.glob("gradient-*.js"))
+    patched_any = False
     for path in files:
-        content = read_text(path)
-        original = content
+        patched_any = patch_apikey_gate_file(path, report) or patched_any
 
-        for pattern in APIKEY_GATE_PATTERNS:
-            content, changed = replace_first(content, pattern, "function e(e){return false}")
-            if changed:
-                report.add_patch(f"{path.name}: apikey gate -> return false")
-                break
+    if not patched_any:
+        fallback_files = [
+            path
+            for path in sorted(paths.assets_dir.glob("*.js"))
+            if path not in files and APIKEY_GATE_FALLBACK_RE.search(read_text(path))
+        ]
+        for path in fallback_files:
+            patched_any = patch_apikey_gate_file(path, report) or patched_any
+
+    if not patched_any:
+        if files:
+            report.warn("Known apikey gate patterns not found; inspect gradient and plugin auth bundles manually")
         else:
-            match = APIKEY_GATE_FALLBACK_RE.search(content)
-            if match:
-                ident = match.group(1)
-                replacement = f"function {ident}({ident}){{return false}}"
-                content = content[: match.start()] + replacement + content[match.end() :]
-                report.add_patch(
-                    f"{path.name}: apikey gate (regex fallback) -> return false"
-                )
-            elif "apikey" in content or "chatgpt" in content:
-                report.warn(
-                    f"{path.name}: known gate patterns not found; inspect manually"
-                )
+            report.warn("gradient-*.js not found; search for return e===`apikey` or return e!==`chatgpt` manually")
 
-        if content != original:
-            write_text(path, content)
-            report.add_file()
 
-    if not files:
-        report.warn("gradient-*.js not found; search for return e===`apikey` or return e!==`chatgpt` manually")
+def patch_apikey_gate_file(path: Path, report: PatchReport) -> bool:
+    content = read_text(path)
+    original = content
+
+    for pattern in APIKEY_GATE_PATTERNS:
+        content, changed = replace_first(content, pattern, "function e(e){return false}")
+        if changed:
+            report.add_patch(f"{path.name}: apikey gate -> return false")
+            break
+    else:
+        match = APIKEY_GATE_FALLBACK_RE.search(content)
+        if match:
+            fn = match.group("fn")
+            arg = match.group("arg")
+            replacement = f"function {fn}({arg}){{return false}}"
+            content = content[: match.start()] + replacement + content[match.end() :]
+            report.add_patch(
+                f"{path.name}: apikey gate (regex fallback) -> return false"
+            )
+        elif "apikey" in content or "chatgpt" in content:
+            report.warn(
+                f"{path.name}: known gate patterns not found; inspect manually"
+            )
+
+    if content == original:
+        return False
+    write_text(path, content)
+    report.add_file(path)
+    return True
 
 
 def patch_connector_gate(paths: AppPaths, report: PatchReport) -> None:
-    for path in sorted(paths.assets_dir.glob("use-plugin-install-flow-*.js")):
+    files = sorted(paths.assets_dir.glob("use-plugin-install-flow-*.js"))
+    files.extend(sorted(paths.assets_dir.glob("check-plugin-availability-*.js")))
+    fallback_files = [
+        path
+        for path in sorted(paths.assets_dir.glob("*.js"))
+        if path not in files and "connector-unavailable" in read_text(path)
+    ]
+    files.extend(fallback_files)
+    for path in files:
         content = read_text(path)
         original = content
 
@@ -204,7 +291,7 @@ def patch_connector_gate(paths: AppPaths, report: PatchReport) -> None:
 
         if content != original:
             write_text(path, content)
-            report.add_file()
+            report.add_file(path)
 
 
 def patch_js(paths: AppPaths, *, include_fast_plugins: bool = True, include_zed_remote: bool = False) -> PatchReport:
@@ -217,7 +304,11 @@ def patch_js(paths: AppPaths, *, include_fast_plugins: bool = True, include_zed_
         patch_plugin_sidebar(paths, report)
         patch_apikey_gate(paths, report)
         patch_connector_gate(paths, report)
-        patch_chrome_plugin_preservation(paths, report)
+        patch_chrome_plugin_preservation(
+            paths,
+            report,
+            include_desktop_surfaces=not getattr(paths, "is_vscode_extension", False),
+        )
     if include_zed_remote:
         patch_zed_remote_open(paths, report)
 

@@ -17,6 +17,12 @@ from .app import (
     stop_codex,
 )
 from .bundle import patch_js
+from .vscode import (
+    backup_vscode_extension,
+    detect_vscode_extension_paths,
+    print_vscode_doctor,
+    rollback_vscode_extension,
+)
 from .zed_remote import detect_zed_remote_status
 
 
@@ -121,6 +127,41 @@ def zed_remote_status(args: argparse.Namespace) -> None:
     print_zed_remote_status(paths)
 
 
+def doctor_vscode(args: argparse.Namespace) -> None:
+    paths = detect_vscode_extension_paths(args.extension_dir)
+    print_vscode_doctor(paths)
+
+
+def patch_vscode(args: argparse.Namespace) -> None:
+    paths = detect_vscode_extension_paths(args.extension_dir)
+    backup_vscode_extension(paths)
+    try:
+        report = patch_js(paths, include_fast_plugins=True, include_zed_remote=False)
+    except BaseException:
+        print("")
+        print("=== VS Code extension patch failed ===")
+        print(f"Rollback command: python3 scripts/patch_codex_fast.py rollback-vscode --extension-dir {paths.extension_dir}")
+        raise
+
+    print("")
+    print("=== VS Code extension patch complete ===")
+    print(f"Extension: {paths.extension_dir}")
+    print(f"Patched files: {report.patched_files}")
+    print(f"Patch actions: {report.patch_actions}")
+    if report.warnings:
+        print("Warnings:")
+        for warning in report.warnings:
+            print(f"  - {warning}")
+    print(f"Rollback command: python3 scripts/patch_codex_fast.py rollback-vscode --extension-dir {paths.extension_dir}")
+    print("Reload VS Code, then verify Fast mode and Plugins in the Codex extension.")
+
+
+def rollback_vscode(args: argparse.Namespace) -> None:
+    paths = detect_vscode_extension_paths(args.extension_dir)
+    rollback_vscode_extension(paths)
+    print("Reload VS Code to pick up the restored extension.")
+
+
 def print_zed_remote_status(paths) -> None:
     status = detect_zed_remote_status(paths)
     print("")
@@ -137,6 +178,10 @@ def print_zed_remote_status(paths) -> None:
 def add_common_args(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("--resources-dir", help="Override Codex resources directory.")
     sub.add_argument("--app-path", help="Override app path passed to @electron/fuses/codesign.")
+
+
+def add_vscode_args(sub: argparse.ArgumentParser) -> None:
+    sub.add_argument("--extension-dir", help="Override OpenAI Codex VS Code extension directory.")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -161,6 +206,18 @@ def build_parser() -> argparse.ArgumentParser:
     zed_status_parser = subparsers.add_parser("zed-remote-status")
     add_common_args(zed_status_parser)
     zed_status_parser.set_defaults(handler=zed_remote_status)
+
+    doctor_vscode_parser = subparsers.add_parser("doctor-vscode")
+    add_vscode_args(doctor_vscode_parser)
+    doctor_vscode_parser.set_defaults(handler=doctor_vscode)
+
+    patch_vscode_parser = subparsers.add_parser("patch-vscode")
+    add_vscode_args(patch_vscode_parser)
+    patch_vscode_parser.set_defaults(handler=patch_vscode)
+
+    rollback_vscode_parser = subparsers.add_parser("rollback-vscode")
+    add_vscode_args(rollback_vscode_parser)
+    rollback_vscode_parser.set_defaults(handler=rollback_vscode)
 
     rollback_parser = subparsers.add_parser("rollback")
     add_common_args(rollback_parser)

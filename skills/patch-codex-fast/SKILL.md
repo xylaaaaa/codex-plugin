@@ -1,15 +1,15 @@
 ---
 name: patch-codex-fast
-description: Patch Codex App to enable Fast/Speed mode and Plugins in API key mode, or optionally enable Zed as an SSH-capable remote open target. Supports macOS and Windows with backup, rollback, and bundle pattern discovery.
+description: Patch Codex App or the OpenAI Codex VS Code extension to enable Fast/Speed mode and Plugins in API key mode, or optionally enable Zed as an SSH-capable remote open target. Supports macOS, Windows, and VS Code extension bundles with backup, rollback, and bundle pattern discovery.
 ---
 
 # Patch Codex Fast
 
-Use this skill when the user wants to enable Codex desktop Fast/Speed mode or Plugins while running Codex with an API key instead of ChatGPT OAuth login. Also use it when the user asks whether Codex remote SSH sessions can open files in Zed, or asks to patch Codex so remote files can be opened with Zed.
+Use this skill when the user wants to enable Codex desktop or VS Code extension Fast/Speed mode or Plugins while running Codex with an API key instead of ChatGPT OAuth login. Also use it when the user asks whether Codex remote SSH sessions can open files in Zed, or asks to patch Codex so remote files can be opened with Zed.
 
 This skill is the main interface after installation through `npx skills` or a manual symlink. Do not make the user copy long shell snippets from the README. Use the scripts in this repository as execution assets, run the right command for the current OS, then report the result and verification steps.
 
-This is an unofficial local patch. Before changing the app, make sure the user understands that it modifies the installed Codex desktop bundle, disables selected Electron integrity fuses, and may need to be re-applied after Codex updates.
+This is an unofficial local patch. Before changing the app, make sure the user understands that desktop patching modifies the installed Codex desktop bundle and disables selected Electron integrity fuses. VS Code patching modifies the installed OpenAI Codex extension bundle. Both may need to be re-applied after Codex updates.
 
 ## Intent
 
@@ -25,7 +25,7 @@ Then the agent should execute the workflow end to end, not respond with a manual
 
 1. Identify the repository root that contains this `SKILL.md`.
 2. Run a doctor check with the repository script.
-3. If the environment is valid, run the patch script for the current OS.
+3. If the environment is valid, run the patch script for the current surface.
 4. Read the full command output and report:
    - whether patch actions were applied,
    - any warnings,
@@ -36,6 +36,14 @@ Then the agent should execute the workflow end to end, not respond with a manual
    - plugin install flow no longer marks all connectors unavailable,
    - Computer Use settings still show the Google Chrome plugin row.
 6. If Codex fails to launch or the user reports a broken state, run rollback immediately.
+
+For the VS Code extension patch:
+
+1. Run `doctor-vscode` to inspect the newest installed `openai.chatgpt-*` extension.
+2. If the environment is valid, run `patch-vscode`.
+3. Read the full output and report the patched extension path, patch actions, warnings, and rollback command.
+4. Ask the user to reload VS Code, then verify Fast/Speed mode and Plugins in the Codex extension.
+5. If the extension breaks, run `rollback-vscode` immediately.
 
 For the Zed remote-open patch only:
 
@@ -54,6 +62,9 @@ python3 scripts/patch_codex_fast.py doctor
 python3 scripts/patch_codex_fast.py patch
 python3 scripts/patch_codex_fast.py patch-zed-remote
 python3 scripts/patch_codex_fast.py zed-remote-status
+python3 scripts/patch_codex_fast.py doctor-vscode
+python3 scripts/patch_codex_fast.py patch-vscode
+python3 scripts/patch_codex_fast.py rollback-vscode
 python3 scripts/patch_codex_fast.py rollback
 ```
 
@@ -93,6 +104,12 @@ Windows:
 
 If Codex is installed somewhere else, pass `--resources-dir` and `--app-path` to the Python command.
 
+VS Code extension:
+
+- Auto-detected roots include `~/.vscode-server/extensions`, `~/.vscode/extensions`, `~/.cursor-server/extensions`, `~/.cursor/extensions`, `~/.windsurf-server/extensions`, and `~/.windsurf/extensions`.
+- Override detection with `--extension-dir <path-to-openai.chatgpt-...>`.
+- Backup is written next to the extension as `<extension>.codex-fast-backup`.
+
 ## Rollback policy
 
 Rollback is part of the skill, not an afterthought. If patching fails after files were changed, or if the app does not launch, run:
@@ -124,6 +141,15 @@ grep -rlE 'return [A-Za-z_$]+(===|!==)`(apikey|chatgpt)`' *.js | grep -v locale
 grep -rl "connector-unavailable" *.js | grep plugin
 ```
 
+For VS Code extension bundle updates, inspect the extension `webview/assets` directory with:
+
+```bash
+grep -rl "fast_mode" webview/assets
+grep -rlE 'return [A-Za-z_$][A-Za-z0-9_$]*(===|!==)`(apikey|chatgpt)`' webview/assets
+grep -rl "connector-unavailable" webview/assets
+grep -rl "isExternalBrowserUseAvailable" webview/assets
+```
+
 Patch the same logical gates described in the README if automated patterns no longer match. Also preserve Chrome by checking these app-bundle surfaces:
 
 ```bash
@@ -146,4 +172,4 @@ The Zed patch keeps local Zed behavior unchanged, marks Zed as SSH-capable for C
 
 ## Success criteria
 
-The task is not complete until the agent has command evidence for the patch or rollback path and has told the user exactly what to verify in the Codex UI, including the Google Chrome row under Computer Use for the Fast/Plugins patch or the remote Open With → Zed flow for the Zed remote patch.
+The task is not complete until the agent has command evidence for the patch or rollback path and has told the user exactly what to verify in the Codex UI, including the Google Chrome row under Computer Use for the desktop Fast/Plugins patch, Fast/Plugins visibility after a VS Code reload for the extension patch, or the remote Open With → Zed flow for the Zed remote patch.

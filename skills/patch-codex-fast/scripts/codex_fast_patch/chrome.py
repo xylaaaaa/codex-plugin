@@ -11,7 +11,7 @@ from .app import AppPaths
 class ChromePatchReporter:
     """Minimal reporting protocol used by Chrome preservation patches."""
 
-    def add_file(self) -> None: ...
+    def add_file(self, path: Path | None = None) -> None: ...
 
     def add_patch(self, message: str) -> None: ...
 
@@ -49,14 +49,22 @@ def replace_first(content: str, old: str, new: str) -> tuple[str, bool]:
     return content.replace(old, new, 1), True
 
 
-def patch_chrome_plugin_preservation(paths: AppPaths, report: ChromePatchReporter) -> None:
+def patch_chrome_plugin_preservation(
+    paths: AppPaths,
+    report: ChromePatchReporter,
+    *,
+    include_desktop_surfaces: bool = True,
+) -> None:
     """Keep the Google Chrome plugin visible after the Dev marketplace rebuilds."""
 
     if not chrome_patch_surfaces_exist(paths):
         return
 
-    patched_name = patch_chrome_runtime_plugin_name(paths, report)
-    patched_descriptor = patch_chrome_marketplace_descriptor(paths, report)
+    patched_name = True
+    patched_descriptor = True
+    if include_desktop_surfaces:
+        patched_name = patch_chrome_runtime_plugin_name(paths, report)
+        patched_descriptor = patch_chrome_marketplace_descriptor(paths, report)
     patched_visibility = patch_chrome_visibility_filter(paths, report)
 
     if not patched_name:
@@ -86,7 +94,7 @@ def patch_chrome_runtime_plugin_name(paths: AppPaths, report: ChromePatchReporte
         content, changed = replace_first(content, "`chrome-internal`", "`chrome`")
         if changed:
             write_text(path, content)
-            report.add_file()
+            report.add_file(path)
             report.add_patch(f"{path.name}: chrome-internal plugin name -> chrome")
             return True
 
@@ -109,7 +117,7 @@ def patch_chrome_marketplace_descriptor(paths: AppPaths, report: ChromePatchRepo
         content, changed = remove_external_browser_gate_from_descriptor(content)
         if changed:
             write_text(path, content)
-            report.add_file()
+            report.add_file(path)
             report.add_patch(f"{path.name}: Chrome marketplace descriptor kept for Dev builds")
             return True
 
@@ -146,7 +154,7 @@ def patch_chrome_visibility_filter(paths: AppPaths, report: ChromePatchReporter)
         content, changed = remove_external_browser_gate_from_chrome_filter(content)
         if changed:
             write_text(path, content)
-            report.add_file()
+            report.add_file(path)
             report.add_patch(f"{path.name}: Chrome plugin no longer hidden by external browser gate")
             return True
         if "isExternalBrowserUseAvailable" in content and "`chrome`" in content and "!n&&" not in content:

@@ -3,7 +3,7 @@
 This directory is the installable `patch-codex-fast` skill package. It is the canonical package discovered by `npx skills` and rendered by skills.sh.
 
 > [!WARNING]
-> This skill applies an unofficial local patch to the Codex desktop app. It modifies the installed app bundle and disables selected Electron integrity fuses so the unpacked app can load.
+> This skill applies an unofficial local patch. Desktop patching modifies the installed Codex app bundle and disables selected Electron integrity fuses so the unpacked app can load. VS Code patching modifies the installed OpenAI Codex extension bundle.
 
 ## Use
 
@@ -15,6 +15,12 @@ After installation, invoke the skill in Codex:
 
 The agent should run the doctor check, execute the patch script for the current OS, report command evidence, and give rollback guidance. The user should not need to copy the patch commands manually.
 
+For VS Code / VS Code Server:
+
+```text
+[$patch-codex-fast] Patch my OpenAI Codex VS Code extension so Fast mode and Plugins work in API key mode.
+```
+
 ## Agent execution assets
 
 Preferred Python entrypoint:
@@ -24,6 +30,9 @@ python3 scripts/patch_codex_fast.py doctor
 python3 scripts/patch_codex_fast.py patch
 python3 scripts/patch_codex_fast.py patch-zed-remote
 python3 scripts/patch_codex_fast.py zed-remote-status
+python3 scripts/patch_codex_fast.py doctor-vscode
+python3 scripts/patch_codex_fast.py patch-vscode
+python3 scripts/patch_codex_fast.py rollback-vscode
 python3 scripts/patch_codex_fast.py rollback
 ```
 
@@ -36,6 +45,9 @@ python .\scripts\patch_codex_fast.py doctor
 python .\scripts\patch_codex_fast.py patch
 python .\scripts\patch_codex_fast.py patch-zed-remote
 python .\scripts\patch_codex_fast.py zed-remote-status
+python .\scripts\patch_codex_fast.py doctor-vscode
+python .\scripts\patch_codex_fast.py patch-vscode
+python .\scripts\patch_codex_fast.py rollback-vscode
 python .\scripts\patch_codex_fast.py rollback
 ```
 
@@ -59,6 +71,7 @@ The task is complete only when the agent has command evidence for the patch or r
 - The Plugins sidebar is visible in API key mode.
 - Plugin install flow no longer marks every connector unavailable.
 - Computer Use settings still show the Google Chrome plugin row after Codex restarts.
+- For VS Code extension patching, Fast/Speed mode and Plugins are visible after VS Code reloads.
 
 For the optional Zed remote-open patch, the task is complete only when the agent has command evidence that `patch-zed-remote` ran or rolled back, and has told the user to verify that a remote Codex file shows Zed under Open With and opens in Zed Remote Development.
 
