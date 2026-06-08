@@ -144,13 +144,52 @@ class VscodeExtensionPatchTest(unittest.TestCase):
             )
             extension_js = (extension / "out" / "extension.js").read_text(encoding="utf-8")
             self.assertIn(
-                'triggerRunCommandViaWebview(e){this.sidebarView&&this.sidebarWebviewReady&&this.postMessageToWebview(this.sidebarView.webview,{type:"run-command",id:e})}',
+                'triggerRenameThreadViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&this.postMessageToWebview(this.sidebarView.webview,{type:"rename-thread"})}',
                 extension_js,
             )
             self.assertIn(
-                'ft.commands.registerCommand("chatgpt.renameThread",async()=>{await Li(),st.triggerRunCommandViaWebview("renameThread")})',
+                'ft.commands.registerCommand("chatgpt.renameThread",async()=>{await Li(),st.triggerRenameThreadViaWebview()})',
                 extension_js,
             )
+
+    def test_vscode_rename_patch_migrates_old_run_command_handler(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            extension = self.make_extension(Path(raw_tmp), "26.601.21317")
+            self.write_patchable_assets(extension)
+            extension_js_path = extension / "out" / "extension.js"
+            extension_js_path.write_text(
+                'triggerNewChatViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&this.postMessageToWebview(this.sidebarView.webview,{type:"new-chat"})}'
+                'triggerRunCommandViaWebview(e){this.sidebarView&&this.sidebarWebviewReady&&this.postMessageToWebview(this.sidebarView.webview,{type:"run-command",id:e})}'
+                'postMessageToWebview(e,r){e.postMessage(r)}'
+                'e.push(ft.commands.registerCommand("chatgpt.renameThread",async()=>{await Li(),st.triggerRunCommandViaWebview("renameThread")})),Xr("commentCodeLensEnabled",!0)',
+                encoding="utf-8",
+            )
+            package_path = extension / "package.json"
+            package_json = json.loads(package_path.read_text(encoding="utf-8"))
+            package_json["contributes"]["commands"].append(
+                {
+                    "command": "chatgpt.renameThread",
+                    "title": "Rename Codex Thread",
+                    "category": "Codex",
+                }
+            )
+            package_path.write_text(json.dumps(package_json), encoding="utf-8")
+            paths = VscodeExtensionPaths(extension)
+            report = PatchReport()
+
+            patch_vscode_rename(paths, report)
+
+            extension_js = extension_js_path.read_text(encoding="utf-8")
+            self.assertIn(
+                'triggerRenameThreadViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&this.postMessageToWebview(this.sidebarView.webview,{type:"rename-thread"})}',
+                extension_js,
+            )
+            self.assertIn(
+                'ft.commands.registerCommand("chatgpt.renameThread",async()=>{await Li(),st.triggerRenameThreadViaWebview()})',
+                extension_js,
+            )
+            self.assertNotIn('triggerRunCommandViaWebview("renameThread")', extension_js)
+            self.assertEqual(report.patch_actions, 2)
 
     def test_vscode_rename_patch_updates_existing_hidden_command(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

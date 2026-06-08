@@ -373,7 +373,7 @@ def patch_vscode_rename_extension_js(paths: AppPaths, report: PatchReport) -> No
 
     if (
         content == original
-        and "triggerRunCommandViaWebview" not in content
+        and "triggerRenameThreadViaWebview" not in content
         and "triggerNewChatViaWebview" not in content
     ):
         report.warn(f"{extension_js.name}: rename webview entrypoints not found; inspect manually")
@@ -384,30 +384,35 @@ def patch_vscode_rename_extension_js(paths: AppPaths, report: PatchReport) -> No
 
 
 def patch_vscode_rename_webview_bridge(path: Path, content: str, report: PatchReport) -> str:
-    if "triggerRunCommandViaWebview" in content:
+    if "triggerRenameThreadViaWebview" in content:
         return content
 
-    old = (
+    new_chat_method = (
         'triggerNewChatViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&'
         'this.postMessageToWebview(this.sidebarView.webview,{type:"new-chat"})}'
-        "postMessageToWebview"
     )
-    new = (
-        'triggerNewChatViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&'
-        'this.postMessageToWebview(this.sidebarView.webview,{type:"new-chat"})}'
-        'triggerRunCommandViaWebview(e){this.sidebarView&&this.sidebarWebviewReady&&'
-        'this.postMessageToWebview(this.sidebarView.webview,{type:"run-command",id:e})}'
-        "postMessageToWebview"
+    rename_method = (
+        'triggerRenameThreadViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&'
+        'this.postMessageToWebview(this.sidebarView.webview,{type:"rename-thread"})}'
     )
-    content, changed = replace_first(content, old, new)
+    content, changed = replace_first(content, new_chat_method, new_chat_method + rename_method)
     if changed:
-        report.add_patch(f"{path.name}: VS Code webview run-command bridge added")
+        report.add_patch(f"{path.name}: VS Code rename-thread host message bridge added")
     elif "triggerNewChatViaWebview" in content:
         report.warn(f"{path.name}: rename webview bridge pattern changed; inspect manually")
     return content
 
 
 def patch_vscode_rename_command_handler(path: Path, content: str, report: PatchReport) -> str:
+    content, updated_count = re.subn(
+        r'\.triggerRunCommandViaWebview\("renameThread"\)',
+        ".triggerRenameThreadViaWebview()",
+        content,
+    )
+    if updated_count > 0:
+        report.add_patch(f"{path.name}: VS Code rename command handler updated")
+        return content
+
     if '"chatgpt.renameThread"' in content:
         return content
 
@@ -417,7 +422,7 @@ def patch_vscode_rename_command_handler(path: Path, content: str, report: PatchR
             f'{match.group("existing").split(".push", 1)[0]}.push('
             f'{match.group("vscode")}.commands.registerCommand("chatgpt.renameThread",async()=>'
             f'{{await {match.group("focus")}(),'
-            f'{match.group("provider")}.triggerRunCommandViaWebview("renameThread")}})),'
+            f'{match.group("provider")}.triggerRenameThreadViaWebview()}})),'
             f"{match.group('tail')}"
         )
 
