@@ -14,6 +14,7 @@ from codex_fast_patch.vscode import (
     VscodeExtensionPaths,
     backup_vscode_extension,
     detect_vscode_extension_paths,
+    extension_version,
     rollback_vscode_extension,
 )
 
@@ -61,6 +62,19 @@ class VscodeExtensionPatchTest(unittest.TestCase):
 
             self.assertEqual(paths.extension_dir, newest)
             self.assertEqual(paths.assets_dir, newest / "webview" / "assets")
+
+    def test_detect_ignores_vscode_backup_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            home = Path(raw_tmp)
+            root = home / ".vscode-server" / "extensions"
+            newest = self.make_extension(root, "26.602.40724")
+            backup = root / "openai.chatgpt-26.999.99999-linux-x64.codex-fast-backup"
+            (backup / "webview" / "assets").mkdir(parents=True)
+
+            paths = detect_vscode_extension_paths(home=home)
+
+            self.assertIsNone(extension_version(backup))
+            self.assertEqual(paths.extension_dir, newest)
 
     def test_patches_vscode_extension_bundle_patterns(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

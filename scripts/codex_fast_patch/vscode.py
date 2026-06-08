@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 EXTENSION_RE = re.compile(r"openai\.chatgpt-(?P<version>\d+(?:\.\d+)+)(?:-.+)?$")
+BACKUP_SUFFIX = ".codex-fast-backup"
 
 
 @dataclass
@@ -77,6 +78,8 @@ def vscode_extension_roots(home: Path) -> tuple[Path, ...]:
 
 
 def extension_version(path: Path) -> tuple[int, ...] | None:
+    if path.name.endswith(BACKUP_SUFFIX):
+        return None
     match = EXTENSION_RE.match(path.name)
     if match is None:
         return None
@@ -84,6 +87,8 @@ def extension_version(path: Path) -> tuple[int, ...] | None:
 
 
 def ensure_vscode_extension(paths: VscodeExtensionPaths) -> None:
+    if paths.extension_dir.name.endswith(BACKUP_SUFFIX):
+        raise SystemExit(f"VS Code extension backup is not a patch target: {paths.extension_dir}")
     if not paths.extension_dir.exists():
         raise SystemExit(f"VS Code extension directory not found: {paths.extension_dir}")
     if not paths.assets_dir.exists():
