@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -10,7 +11,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from codex_fast_patch.bundle import patch_js
+from codex_fast_patch.bundle import PatchReport, patch_js, patch_vscode_rename
 from codex_fast_patch.cli import build_parser
 from codex_fast_patch.vscode import (
     VscodeExtensionPaths,
@@ -138,7 +139,6 @@ class VscodeExtensionPatchTest(unittest.TestCase):
                     "command": "chatgpt.renameThread",
                     "title": "Rename Codex Thread",
                     "category": "Codex",
-                    "enablement": "chatgpt.sidebarView.visible",
                 },
                 package_json["contributes"]["commands"],
             )
@@ -151,6 +151,75 @@ class VscodeExtensionPatchTest(unittest.TestCase):
                 'ft.commands.registerCommand("chatgpt.renameThread",async()=>{await Li(),st.triggerRunCommandViaWebview("renameThread")})',
                 extension_js,
             )
+
+    def test_vscode_rename_patch_updates_existing_hidden_command(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            extension = self.make_extension(Path(raw_tmp), "26.601.21317")
+            self.write_patchable_assets(extension)
+            package_path = extension / "package.json"
+            package_json = json.loads(package_path.read_text(encoding="utf-8"))
+            package_json["contributes"]["commands"].append(
+                {
+                    "command": "chatgpt.renameThread",
+                    "title": "Rename Codex Thread",
+                    "category": "Codex",
+                    "enablement": "chatgpt.sidebarView.visible",
+                }
+            )
+            package_path.write_text(json.dumps(package_json), encoding="utf-8")
+            paths = VscodeExtensionPaths(extension)
+            report = PatchReport()
+
+            patch_vscode_rename(paths, report)
+
+            patched_package = json.loads(package_path.read_text(encoding="utf-8"))
+            rename_commands = [
+                command
+                for command in patched_package["contributes"]["commands"]
+                if command["command"] == "chatgpt.renameThread"
+            ]
+            self.assertEqual(
+                rename_commands,
+                [
+                    {
+                        "command": "chatgpt.renameThread",
+                        "title": "Rename Codex Thread",
+                        "category": "Codex",
+                    }
+                ],
+            )
+            self.assertEqual(report.patch_actions, 3)
+
+    def test_vscode_rename_patch_invalidates_extensions_index_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            extension = self.make_extension(root, "26.601.21317")
+            self.write_patchable_assets(extension)
+            (extension / "out" / "extension.js").write_text(
+                'triggerRunCommandViaWebview(e){}'
+                'ft.commands.registerCommand("chatgpt.renameThread",async()=>{})',
+                encoding="utf-8",
+            )
+            package_path = extension / "package.json"
+            package_json = json.loads(package_path.read_text(encoding="utf-8"))
+            package_json["contributes"]["commands"].append(
+                {
+                    "command": "chatgpt.renameThread",
+                    "title": "Rename Codex Thread",
+                    "category": "Codex",
+                }
+            )
+            package_path.write_text(json.dumps(package_json), encoding="utf-8")
+            extensions_index = root / "extensions.json"
+            extensions_index.write_text("[]", encoding="utf-8")
+            os.utime(extensions_index, (1, 1))
+            paths = VscodeExtensionPaths(extension)
+            report = PatchReport()
+
+            patch_vscode_rename(paths, report)
+
+            self.assertGreater(extensions_index.stat().st_mtime, 1)
+            self.assertEqual(report.patch_actions, 0)
 
     def test_vscode_backup_and_rollback_restore_modified_files(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

@@ -54,7 +54,6 @@ VSCODE_RENAME_COMMAND = {
     "command": "chatgpt.renameThread",
     "title": "Rename Codex Thread",
     "category": "Codex",
-    "enablement": "chatgpt.sidebarView.visible",
 }
 
 
@@ -327,13 +326,37 @@ def patch_vscode_rename_package(paths: AppPaths, report: PatchReport) -> None:
     package_json = json.loads(read_text(package_path))
     contributes = package_json.setdefault("contributes", {})
     commands = contributes.setdefault("commands", [])
-    if any(command.get("command") == VSCODE_RENAME_COMMAND["command"] for command in commands):
-        return
+    for command in commands:
+        if command.get("command") == VSCODE_RENAME_COMMAND["command"]:
+            if command != VSCODE_RENAME_COMMAND:
+                command.clear()
+                command.update(VSCODE_RENAME_COMMAND)
+                package_path.write_text(json.dumps(package_json, indent=2) + "\n", encoding="utf-8")
+                refresh_vscode_extensions_index(paths, report)
+                report.add_file(package_path)
+                report.add_patch(f"{package_path.name}: VS Code rename command contribution updated")
+            else:
+                refresh_vscode_extensions_index(paths, report)
+            return
 
     commands.append(VSCODE_RENAME_COMMAND)
     package_path.write_text(json.dumps(package_json, indent=2) + "\n", encoding="utf-8")
+    refresh_vscode_extensions_index(paths, report)
     report.add_file(package_path)
     report.add_patch(f"{package_path.name}: VS Code rename command contribution added")
+
+
+def refresh_vscode_extensions_index(paths: AppPaths, report: PatchReport) -> None:
+    extension_dir = getattr(paths, "extension_dir", None)
+    if extension_dir is None:
+        return
+
+    extensions_index = extension_dir.parent / "extensions.json"
+    if not extensions_index.exists():
+        return
+
+    extensions_index.touch()
+    print(f"[OK] Refreshed VS Code extension manifest cache input -> {extensions_index}")
 
 
 def patch_vscode_rename_extension_js(paths: AppPaths, report: PatchReport) -> None:
