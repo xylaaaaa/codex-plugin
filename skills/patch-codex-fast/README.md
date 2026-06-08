@@ -21,6 +21,12 @@ For VS Code / VS Code Server:
 [$patch-codex-fast] Patch my OpenAI Codex VS Code extension so Fast mode and Plugins work in API key mode.
 ```
 
+For VS Code conversation rename:
+
+```text
+[$patch-codex-fast] Patch my OpenAI Codex VS Code extension so I can rename Codex threads.
+```
+
 ## Agent execution assets
 
 Preferred Python entrypoint:
@@ -32,6 +38,7 @@ python3 scripts/patch_codex_fast.py patch-zed-remote
 python3 scripts/patch_codex_fast.py zed-remote-status
 python3 scripts/patch_codex_fast.py doctor-vscode
 python3 scripts/patch_codex_fast.py patch-vscode
+python3 scripts/patch_codex_fast.py patch-vscode-rename
 python3 scripts/patch_codex_fast.py rollback-vscode
 python3 scripts/patch_codex_fast.py rollback
 ```
@@ -47,6 +54,7 @@ python .\scripts\patch_codex_fast.py patch-zed-remote
 python .\scripts\patch_codex_fast.py zed-remote-status
 python .\scripts\patch_codex_fast.py doctor-vscode
 python .\scripts\patch_codex_fast.py patch-vscode
+python .\scripts\patch_codex_fast.py patch-vscode-rename
 python .\scripts\patch_codex_fast.py rollback-vscode
 python .\scripts\patch_codex_fast.py rollback
 ```
@@ -72,6 +80,7 @@ The task is complete only when the agent has command evidence for the patch or r
 - Plugin install flow no longer marks every connector unavailable.
 - Computer Use settings still show the Google Chrome plugin row after Codex restarts.
 - For VS Code extension patching, Fast/Speed mode and Plugins are visible after VS Code reloads.
+- For VS Code rename patching, `Codex: Rename Codex Thread` is visible after VS Code reloads and works while a thread is open.
 
 For the optional Zed remote-open patch, the task is complete only when the agent has command evidence that `patch-zed-remote` ran or rolled back, and has told the user to verify that a remote Codex file shows Zed under Open With and opens in Zed Remote Development.
 

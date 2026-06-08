@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +40,22 @@ VSCODE_SERVICE_TIER_GATE_RE = re.compile(
     r"(?P<allowed>[A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*&&!?(?P<loading_ref>[A-Za-z_$][\w$]*)"
     r"&&[^,;]+fast_mode!==!1"
 )
+
+VSCODE_NEW_CHAT_COMMAND_RE = re.compile(
+    r"(?P<existing>[A-Za-z_$][\w$]*\.push\("
+    r"(?P<vscode>[A-Za-z_$][\w$]*)\.commands\.registerCommand\("
+    r"(?P<new_chat>[A-Za-z_$][\w$]*),async\(\)=>\{await "
+    r"(?P<focus>[A-Za-z_$][\w$]*)\(\),"
+    r"(?P<provider>[A-Za-z_$][\w$]*)\.triggerNewChatViaWebview\(\)\}\)\)),"
+    r"(?P<tail>[A-Za-z_$][\w$]*\(\"commentCodeLensEnabled\")"
+)
+
+VSCODE_RENAME_COMMAND = {
+    "command": "chatgpt.renameThread",
+    "title": "Rename Codex Thread",
+    "category": "Codex",
+    "enablement": "chatgpt.sidebarView.visible",
+}
 
 
 @dataclass
@@ -294,6 +311,101 @@ def patch_connector_gate(paths: AppPaths, report: PatchReport) -> None:
             report.add_file(path)
 
 
+def patch_vscode_rename(paths: AppPaths, report: PatchReport) -> None:
+    if not getattr(paths, "is_vscode_extension", False):
+        return
+    patch_vscode_rename_package(paths, report)
+    patch_vscode_rename_extension_js(paths, report)
+
+
+def patch_vscode_rename_package(paths: AppPaths, report: PatchReport) -> None:
+    package_path = paths.extracted_app_dir / "package.json"
+    if not package_path.exists():
+        report.warn("VS Code package.json not found; rename command contribution was not patched")
+        return
+
+    package_json = json.loads(read_text(package_path))
+    contributes = package_json.setdefault("contributes", {})
+    commands = contributes.setdefault("commands", [])
+    if any(command.get("command") == VSCODE_RENAME_COMMAND["command"] for command in commands):
+        return
+
+    commands.append(VSCODE_RENAME_COMMAND)
+    package_path.write_text(json.dumps(package_json, indent=2) + "\n", encoding="utf-8")
+    report.add_file(package_path)
+    report.add_patch(f"{package_path.name}: VS Code rename command contribution added")
+
+
+def patch_vscode_rename_extension_js(paths: AppPaths, report: PatchReport) -> None:
+    extension_js = paths.extracted_app_dir / "out" / "extension.js"
+    if not extension_js.exists():
+        report.warn("VS Code out/extension.js not found; rename command handler was not patched")
+        return
+
+    content = read_text(extension_js)
+    original = content
+
+    content = patch_vscode_rename_webview_bridge(extension_js, content, report)
+    content = patch_vscode_rename_command_handler(extension_js, content, report)
+
+    if (
+        content == original
+        and "triggerRunCommandViaWebview" not in content
+        and "triggerNewChatViaWebview" not in content
+    ):
+        report.warn(f"{extension_js.name}: rename webview entrypoints not found; inspect manually")
+
+    if content != original:
+        write_text(extension_js, content)
+        report.add_file(extension_js)
+
+
+def patch_vscode_rename_webview_bridge(path: Path, content: str, report: PatchReport) -> str:
+    if "triggerRunCommandViaWebview" in content:
+        return content
+
+    old = (
+        'triggerNewChatViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&'
+        'this.postMessageToWebview(this.sidebarView.webview,{type:"new-chat"})}'
+        "postMessageToWebview"
+    )
+    new = (
+        'triggerNewChatViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&'
+        'this.postMessageToWebview(this.sidebarView.webview,{type:"new-chat"})}'
+        'triggerRunCommandViaWebview(e){this.sidebarView&&this.sidebarWebviewReady&&'
+        'this.postMessageToWebview(this.sidebarView.webview,{type:"run-command",id:e})}'
+        "postMessageToWebview"
+    )
+    content, changed = replace_first(content, old, new)
+    if changed:
+        report.add_patch(f"{path.name}: VS Code webview run-command bridge added")
+    elif "triggerNewChatViaWebview" in content:
+        report.warn(f"{path.name}: rename webview bridge pattern changed; inspect manually")
+    return content
+
+
+def patch_vscode_rename_command_handler(path: Path, content: str, report: PatchReport) -> str:
+    if '"chatgpt.renameThread"' in content:
+        return content
+
+    def replacement(match: re.Match[str]) -> str:
+        return (
+            f"{match.group('existing')},"
+            f'{match.group("existing").split(".push", 1)[0]}.push('
+            f'{match.group("vscode")}.commands.registerCommand("chatgpt.renameThread",async()=>'
+            f'{{await {match.group("focus")}(),'
+            f'{match.group("provider")}.triggerRunCommandViaWebview("renameThread")}})),'
+            f"{match.group('tail')}"
+        )
+
+    content, count = VSCODE_NEW_CHAT_COMMAND_RE.subn(replacement, content, count=1)
+    if count > 0:
+        report.add_patch(f"{path.name}: VS Code rename command handler registered")
+    elif "triggerNewChatViaWebview" in content:
+        report.warn(f"{path.name}: rename command registration pattern changed; inspect manually")
+    return content
+
+
 def patch_js(paths: AppPaths, *, include_fast_plugins: bool = True, include_zed_remote: bool = False) -> PatchReport:
     if not paths.assets_dir.exists():
         raise SystemExit(f"Assets directory not found after extraction: {paths.assets_dir}")
@@ -309,6 +421,7 @@ def patch_js(paths: AppPaths, *, include_fast_plugins: bool = True, include_zed_
             report,
             include_desktop_surfaces=not getattr(paths, "is_vscode_extension", False),
         )
+        patch_vscode_rename(paths, report)
     if include_zed_remote:
         patch_zed_remote_open(paths, report)
 

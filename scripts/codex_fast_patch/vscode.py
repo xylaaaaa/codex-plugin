@@ -95,9 +95,12 @@ def ensure_vscode_extension(paths: VscodeExtensionPaths) -> None:
         raise SystemExit(f"VS Code extension webview assets not found: {paths.assets_dir}")
 
 
-def backup_vscode_extension(paths: VscodeExtensionPaths) -> None:
+def backup_vscode_extension(paths: VscodeExtensionPaths, *, allow_existing: bool = False) -> None:
     ensure_vscode_extension(paths)
     if paths.backup_dir.exists():
+        if allow_existing:
+            print(f"[OK] Reusing existing VS Code extension backup -> {paths.backup_dir}")
+            return
         raise SystemExit(
             f"Backup already exists: {paths.backup_dir}. "
             "Run rollback-vscode first or remove the stale backup after inspecting it."

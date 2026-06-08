@@ -6,7 +6,7 @@
 
 [![skills.sh](https://skills.sh/b/crazymsn/codex-plugin)](https://skills.sh/crazymsn/codex-plugin/patch-codex-fast)
 
-A Codex skill that patches the local Codex desktop app or the OpenAI Codex VS Code extension so **Fast/Speed mode** and **Plugins** are available when Codex is signed in with an **API key** instead of ChatGPT OAuth. It can also optionally patch Codex remote SSH sessions so **Zed** appears as a remote-capable “Open With” target.
+A Codex skill that patches the local Codex desktop app or the OpenAI Codex VS Code extension so **Fast/Speed mode** and **Plugins** are available when Codex is signed in with an **API key** instead of ChatGPT OAuth. It can also expose the VS Code extension’s conversation rename command and optionally patch Codex remote SSH sessions so **Zed** appears as a remote-capable “Open With” target.
 
 The main artifact is the installable skill package at `skills/patch-codex-fast/SKILL.md`. Install the repository through `npx skills`, then ask Codex to run `patch-codex-fast`. Codex should handle the doctor check, patch execution, verification, and rollback guidance for you.
 
@@ -21,7 +21,7 @@ When invoked, the skill guides Codex to:
 2. Back up the original `app.asar` or VS Code extension directory.
 3. Extract and patch the local Codex desktop bundle, or patch VS Code extension webview assets in place.
 4. Re-sign the app on macOS.
-5. Ask you to verify Fast/Speed mode, Plugins, and the Google Chrome row under Computer Use in API key mode.
+5. Ask you to verify Fast/Speed mode, Plugins, VS Code conversation rename where applicable, and the Google Chrome row under Computer Use in API key mode.
 6. Roll back immediately if Codex fails to launch.
 
 You do not need to copy long patch commands manually. The scripts under the skill package are execution assets used by the skill.
@@ -86,6 +86,12 @@ For VS Code / VS Code Server:
 Use patch-codex-fast to enable Fast mode and Plugins in my OpenAI Codex VS Code extension.
 ```
 
+For VS Code conversation rename:
+
+```text
+Use patch-codex-fast to enable renaming Codex threads in my OpenAI Codex VS Code extension.
+```
+
 The skill will run the appropriate local script for your OS. It should not ask you to perform the patch steps manually unless your environment blocks execution or the Codex bundle changed enough that manual inspection is required.
 
 ## Expected Codex flow
@@ -95,7 +101,7 @@ The skill is designed for this workflow:
 1. Run `doctor` to inspect environment and app paths, or `doctor-vscode` for the VS Code extension.
 2. Run `patch` for the current OS, or `patch-vscode` for VS Code.
 3. Report the patch result and any warnings.
-4. Ask you to completely quit and reopen Codex, or reload VS Code for extension patching, then verify the UI including Google Chrome under Computer Use where applicable.
+4. Ask you to completely quit and reopen Codex, or reload VS Code for extension patching, then verify the UI including Google Chrome under Computer Use or the `Codex: Rename Codex Thread` command where applicable.
 5. Run `rollback` or `rollback-vscode` if launch or verification fails.
 
 Because this modifies an installed desktop application, Codex may warn before executing commands that stop Codex or write under the app installation directory.
@@ -192,6 +198,7 @@ python .\scripts\patch_codex_fast.py rollback
 ```bash
 python3 scripts/patch_codex_fast.py doctor-vscode
 python3 scripts/patch_codex_fast.py patch-vscode
+python3 scripts/patch_codex_fast.py patch-vscode-rename
 ```
 
 Rollback:
@@ -206,7 +213,7 @@ python3 scripts/patch_codex_fast.py rollback-vscode
 | --- | --- | --- |
 | `--resources-dir` | all commands | Override the Codex resources directory. |
 | `--app-path` | all commands | Override the path passed to `@electron/fuses` and macOS `codesign`. |
-| `--extension-dir` | `doctor-vscode`, `patch-vscode`, `rollback-vscode` | Override the OpenAI Codex VS Code extension directory. |
+| `--extension-dir` | `doctor-vscode`, `patch-vscode`, `patch-vscode-rename`, `rollback-vscode` | Override the OpenAI Codex VS Code extension directory. |
 | `--no-stop` | `patch`, `rollback` | Do not stop the running Codex app before changing files. |
 | `--zed-remote` | `patch` | Apply the Zed remote-open patch together with the Fast/Plugins patch. |
 
@@ -254,6 +261,7 @@ For VS Code extension bundles, the patch changes equivalent webview asset gates:
 | API key detector | Force the plugin auth gate to return `false`. | Stop the extension UI from treating API-key mode as plugin-unsupported. |
 | Connector gate | Prefix connector-unavailable assignment with `false&&`. | Stop every connector from being marked unavailable. |
 | Chrome visibility filter | Remove the external-browser availability check for Chrome plugins. | Keep Chrome-visible plugin surfaces present when available. |
+| Rename command | Add `chatgpt.renameThread` to VS Code command contributions and route it to the webview `renameThread` action. | Allow renaming the currently open Codex thread from the VS Code command palette. |
 
 Optional Zed remote-open patch:
 
@@ -294,6 +302,8 @@ grep -rl "fast_mode" webview/assets
 grep -rlE 'return [A-Za-z_$][A-Za-z0-9_$]*(===|!==)`(apikey|chatgpt)`' webview/assets
 grep -rl "connector-unavailable" webview/assets
 grep -rl "isExternalBrowserUseAvailable" webview/assets
+grep -rl "triggerNewChatViaWebview" out
+grep -rl "chatgpt.newChat" package.json out
 ```
 
 The same logical gates should be patched even if filenames or minified variables changed.

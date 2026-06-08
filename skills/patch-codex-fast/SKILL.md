@@ -1,11 +1,11 @@
 ---
 name: patch-codex-fast
-description: Patch Codex App or the OpenAI Codex VS Code extension to enable Fast/Speed mode and Plugins in API key mode, or optionally enable Zed as an SSH-capable remote open target. Supports macOS, Windows, and VS Code extension bundles with backup, rollback, and bundle pattern discovery.
+description: Patch Codex App or the OpenAI Codex VS Code extension to enable Fast/Speed mode and Plugins in API key mode, expose VS Code conversation rename, or optionally enable Zed as an SSH-capable remote open target. Supports macOS, Windows, and VS Code extension bundles with backup, rollback, and bundle pattern discovery.
 ---
 
 # Patch Codex Fast
 
-Use this skill when the user wants to enable Codex desktop or VS Code extension Fast/Speed mode or Plugins while running Codex with an API key instead of ChatGPT OAuth login. Also use it when the user asks whether Codex remote SSH sessions can open files in Zed, or asks to patch Codex so remote files can be opened with Zed.
+Use this skill when the user wants to enable Codex desktop or VS Code extension Fast/Speed mode or Plugins while running Codex with an API key instead of ChatGPT OAuth login. Also use it when the user wants to rename Codex conversations in the VS Code extension, asks whether Codex remote SSH sessions can open files in Zed, or asks to patch Codex so remote files can be opened with Zed.
 
 This skill is the main interface after installation through `npx skills` or a manual symlink. Do not make the user copy long shell snippets from the README. Use the scripts in this repository as execution assets, run the right command for the current OS, then report the result and verification steps.
 
@@ -42,8 +42,14 @@ For the VS Code extension patch:
 1. Run `doctor-vscode` to inspect the newest installed `openai.chatgpt-*` extension.
 2. If the environment is valid, run `patch-vscode`.
 3. Read the full output and report the patched extension path, patch actions, warnings, and rollback command.
-4. Ask the user to reload VS Code, then verify Fast/Speed mode and Plugins in the Codex extension.
+4. Ask the user to reload VS Code, then verify Fast/Speed mode, Plugins, and the `Codex: Rename Codex Thread` command in the Codex extension.
 5. If the extension breaks, run `rollback-vscode` immediately.
+
+For VS Code conversation rename only:
+
+1. Run `doctor-vscode` to inspect the newest installed `openai.chatgpt-*` extension.
+2. Run `patch-vscode-rename`; it may reuse an existing `.codex-fast-backup`.
+3. Ask the user to reload VS Code, open a Codex thread, then run `Codex: Rename Codex Thread` from the VS Code command palette.
 
 For the Zed remote-open patch only:
 
@@ -64,6 +70,7 @@ python3 scripts/patch_codex_fast.py patch-zed-remote
 python3 scripts/patch_codex_fast.py zed-remote-status
 python3 scripts/patch_codex_fast.py doctor-vscode
 python3 scripts/patch_codex_fast.py patch-vscode
+python3 scripts/patch_codex_fast.py patch-vscode-rename
 python3 scripts/patch_codex_fast.py rollback-vscode
 python3 scripts/patch_codex_fast.py rollback
 ```
@@ -148,6 +155,8 @@ grep -rl "fast_mode" webview/assets
 grep -rlE 'return [A-Za-z_$][A-Za-z0-9_$]*(===|!==)`(apikey|chatgpt)`' webview/assets
 grep -rl "connector-unavailable" webview/assets
 grep -rl "isExternalBrowserUseAvailable" webview/assets
+grep -rl "triggerNewChatViaWebview" out
+grep -rl "chatgpt.newChat" package.json out
 ```
 
 Patch the same logical gates described in the README if automated patterns no longer match. Also preserve Chrome by checking these app-bundle surfaces:
@@ -172,4 +181,4 @@ The Zed patch keeps local Zed behavior unchanged, marks Zed as SSH-capable for C
 
 ## Success criteria
 
-The task is not complete until the agent has command evidence for the patch or rollback path and has told the user exactly what to verify in the Codex UI, including the Google Chrome row under Computer Use for the desktop Fast/Plugins patch, Fast/Plugins visibility after a VS Code reload for the extension patch, or the remote Open With → Zed flow for the Zed remote patch.
+The task is not complete until the agent has command evidence for the patch or rollback path and has told the user exactly what to verify in the Codex UI, including the Google Chrome row under Computer Use for the desktop Fast/Plugins patch, Fast/Plugins visibility and `Codex: Rename Codex Thread` after a VS Code reload for the extension patch, or the remote Open With → Zed flow for the Zed remote patch.

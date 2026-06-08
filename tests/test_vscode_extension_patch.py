@@ -1,3 +1,4 @@
+import json
 import shutil
 import sys
 import tempfile
@@ -10,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from codex_fast_patch.bundle import patch_js
+from codex_fast_patch.cli import build_parser
 from codex_fast_patch.vscode import (
     VscodeExtensionPaths,
     backup_vscode_extension,
@@ -24,11 +26,29 @@ class VscodeExtensionPatchTest(unittest.TestCase):
         extension = root / f"openai.chatgpt-{version}-linux-x64"
         assets = extension / "webview" / "assets"
         assets.mkdir(parents=True)
-        (extension / "package.json").write_text('{"name":"chatgpt"}', encoding="utf-8")
+        (extension / "package.json").write_text(
+            json.dumps(
+                {
+                    "name": "chatgpt",
+                    "contributes": {
+                        "commands": [
+                            {
+                                "command": "chatgpt.newChat",
+                                "title": "New Thread in Codex Sidebar",
+                                "category": "Codex",
+                            }
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         return extension
 
     def write_patchable_assets(self, extension: Path) -> None:
         assets = extension / "webview" / "assets"
+        out_dir = extension / "out"
+        out_dir.mkdir()
         (assets / "read-service-tier-for-request-a.js").write_text(
             "async function p(e,t){let n=await u(e,t);return n===`chatgpt`?"
             "(await e.query.fetch(c,{authMethod:n,hostId:t})).requirements?.featureRequirements?.fast_mode!==!1:!1}",
@@ -47,6 +67,12 @@ class VscodeExtensionPatchTest(unittest.TestCase):
         )
         (assets / "check-plugin-availability-a.js").write_text(
             "(r||n!=null&&!n.isPending&&n.error==null&&n.data==null)&&(i=`connector-unavailable`)",
+            encoding="utf-8",
+        )
+        (out_dir / "extension.js").write_text(
+            "triggerNewChatViaWebview(){this.sidebarView&&this.sidebarWebviewReady&&this.postMessageToWebview(this.sidebarView.webview,{type:\"new-chat\"})}"
+            "postMessageToWebview(e,r){e.postMessage(r)}"
+            "e.push(ft.commands.registerCommand(x7e,async()=>{await Li(),st.triggerNewChatViaWebview()})),Xr(\"commentCodeLensEnabled\",!0)",
             encoding="utf-8",
         )
 
@@ -84,8 +110,8 @@ class VscodeExtensionPatchTest(unittest.TestCase):
 
             report = patch_js(paths)
 
-            self.assertEqual(report.patch_actions, 5)
-            self.assertEqual(report.patched_files, 4)
+            self.assertEqual(report.patch_actions, 8)
+            self.assertEqual(report.patched_files, 6)
             self.assertIn(
                 "async function p(e,t){return true}",
                 (paths.assets_dir / "read-service-tier-for-request-a.js").read_text(encoding="utf-8"),
@@ -105,6 +131,25 @@ class VscodeExtensionPatchTest(unittest.TestCase):
             self.assertIn(
                 "false&&(i=`connector-unavailable`)",
                 (paths.assets_dir / "check-plugin-availability-a.js").read_text(encoding="utf-8"),
+            )
+            package_json = json.loads((extension / "package.json").read_text(encoding="utf-8"))
+            self.assertIn(
+                {
+                    "command": "chatgpt.renameThread",
+                    "title": "Rename Codex Thread",
+                    "category": "Codex",
+                    "enablement": "chatgpt.sidebarView.visible",
+                },
+                package_json["contributes"]["commands"],
+            )
+            extension_js = (extension / "out" / "extension.js").read_text(encoding="utf-8")
+            self.assertIn(
+                'triggerRunCommandViaWebview(e){this.sidebarView&&this.sidebarWebviewReady&&this.postMessageToWebview(this.sidebarView.webview,{type:"run-command",id:e})}',
+                extension_js,
+            )
+            self.assertIn(
+                'ft.commands.registerCommand("chatgpt.renameThread",async()=>{await Li(),st.triggerRunCommandViaWebview("renameThread")})',
+                extension_js,
             )
 
     def test_vscode_backup_and_rollback_restore_modified_files(self) -> None:
@@ -134,6 +179,34 @@ class VscodeExtensionPatchTest(unittest.TestCase):
 
             with self.assertRaises(SystemExit):
                 backup_vscode_extension(paths)
+
+    def test_vscode_backup_can_reuse_existing_backup_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            extension = self.make_extension(Path(raw_tmp), "26.601.21317")
+            self.write_patchable_assets(extension)
+            paths = VscodeExtensionPaths(extension)
+
+            backup_vscode_extension(paths)
+            original_backup_package = (paths.backup_dir / "package.json").read_text(encoding="utf-8")
+            (extension / "package.json").write_text('{"name":"patched"}', encoding="utf-8")
+
+            backup_vscode_extension(paths, allow_existing=True)
+
+            self.assertEqual(
+                (paths.backup_dir / "package.json").read_text(encoding="utf-8"),
+                original_backup_package,
+            )
+
+    def test_cli_has_vscode_rename_patch_command(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "patch-vscode-rename",
+                "--extension-dir",
+                "/tmp/openai.chatgpt-26.601.21317-linux-x64",
+            ]
+        )
+
+        self.assertEqual(args.handler.__name__, "patch_vscode_rename")
 
 
 if __name__ == "__main__":

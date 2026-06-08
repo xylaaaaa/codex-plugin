@@ -16,7 +16,7 @@ from .app import (
     restore_stock_fuses,
     stop_codex,
 )
-from .bundle import patch_js
+from .bundle import PatchReport, patch_js, patch_vscode_rename as patch_vscode_rename_bundle
 from .vscode import (
     backup_vscode_extension,
     detect_vscode_extension_paths,
@@ -134,7 +134,7 @@ def doctor_vscode(args: argparse.Namespace) -> None:
 
 def patch_vscode(args: argparse.Namespace) -> None:
     paths = detect_vscode_extension_paths(args.extension_dir)
-    backup_vscode_extension(paths)
+    backup_vscode_extension(paths, allow_existing=True)
     try:
         report = patch_js(paths, include_fast_plugins=True, include_zed_remote=False)
     except BaseException:
@@ -154,6 +154,27 @@ def patch_vscode(args: argparse.Namespace) -> None:
             print(f"  - {warning}")
     print(f"Rollback command: python3 scripts/patch_codex_fast.py rollback-vscode --extension-dir {paths.extension_dir}")
     print("Reload VS Code, then verify Fast mode and Plugins in the Codex extension.")
+
+
+def patch_vscode_rename(args: argparse.Namespace) -> None:
+    paths = detect_vscode_extension_paths(args.extension_dir)
+    backup_vscode_extension(paths, allow_existing=True)
+    report = PatchReport()
+    patch_vscode_rename_bundle(paths, report)
+
+    print("")
+    print("=== VS Code rename patch complete ===")
+    print(f"Extension: {paths.extension_dir}")
+    print(f"Patched files: {report.patched_files}")
+    print(f"Patch actions: {report.patch_actions}")
+    if report.warnings:
+        print("Warnings:")
+        for warning in report.warnings:
+            print(f"  - {warning}")
+    if report.patch_actions == 0:
+        print("No rename patches were applied; the extension may already be patched.")
+    print(f"Rollback command: python3 scripts/patch_codex_fast.py rollback-vscode --extension-dir {paths.extension_dir}")
+    print("Reload VS Code, then run the Codex: Rename Codex Thread command while a thread is open.")
 
 
 def rollback_vscode(args: argparse.Namespace) -> None:
@@ -214,6 +235,10 @@ def build_parser() -> argparse.ArgumentParser:
     patch_vscode_parser = subparsers.add_parser("patch-vscode")
     add_vscode_args(patch_vscode_parser)
     patch_vscode_parser.set_defaults(handler=patch_vscode)
+
+    patch_vscode_rename_parser = subparsers.add_parser("patch-vscode-rename")
+    add_vscode_args(patch_vscode_rename_parser)
+    patch_vscode_rename_parser.set_defaults(handler=patch_vscode_rename)
 
     rollback_vscode_parser = subparsers.add_parser("rollback-vscode")
     add_vscode_args(rollback_vscode_parser)
